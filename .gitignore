@@ -1,0 +1,12 @@
+node_modules
+.next
+coverage
+playwright-report
+test-results
+data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.DS_Store
+*.tsbuildinfo
