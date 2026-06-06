@@ -1,0 +1,44 @@
+services:
+  web:
+    image: ${COMPRESSARR_IMAGE:-docker.io/didair/compressarr:latest}
+    build: .
+    container_name: compressarr-web
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./config:/config
+      - ${HOME}/media:/media
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: ${COMPRESSARR_IMAGE:-docker.io/didair/compressarr:latest}
+    build: .
+    container_name: compressarr-worker
+    restart: unless-stopped
+    command: ["pnpm", "worker"]
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+    volumes:
+      - ./config:/config
+      - ${HOME}/media:/media
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs');const p='/tmp/compressarr-worker-health';if(!fs.existsSync(p)||Date.now()-Number(fs.readFileSync(p,'utf8'))>30000)process.exit(1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

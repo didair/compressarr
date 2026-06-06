@@ -13,11 +13,11 @@ Requirements:
 - Local storage for the `/config` volume
 
 1. Download `docker-compose.yml`.
-2. Replace `/path/to/media` with the path to your media library.
-3. Replace `docker.io/yourusername/compressarr:latest` with the published Docker Hub image, or run from this repository to build locally.
-4. Start the application:
+2. Set the media volume to the path of your media library.
+3. Start the application:
 
 ```bash
+docker compose pull
 docker compose up -d
 ```
 
@@ -31,6 +31,8 @@ The `/media` mount must be read/write. The `/config` mount stores the database a
 docker compose pull
 docker compose up -d
 ```
+
+The Docker Hub image is `didair/compressarr`.
 
 ## Backup
 

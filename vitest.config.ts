@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./tests/setup.ts"],
-    exclude: ["tests/e2e/**", "node_modules/**"],
+    exclude: [".next/**", "node_modules/**"],
     fileParallelism: false,
     coverage: {
       reporter: ["text", "html"],
