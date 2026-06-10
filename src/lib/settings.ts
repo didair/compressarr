@@ -22,7 +22,9 @@ const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export const appSettingsSchema = z.object({
   minimumFileAgeHours: z.number().min(0).max(8760),
+  minimumFileAgeUnit: z.enum(["minutes", "hours", "days", "weeks", "months"]),
   scanIntervalMinutes: z.number().int().min(1).max(10080),
+  scanIntervalUnit: z.enum(["minutes", "hours", "days"]),
   eligibleCodecs: z.array(z.string()).min(1),
   qualityProfile: z.enum(["high", "balanced", "compact"]),
   minimumSavingsPercent: z.number().min(0).max(99),
@@ -38,7 +40,9 @@ export type AppSettings = z.infer<typeof appSettingsSchema>;
 
 export const defaultSettings: AppSettings = {
   minimumFileAgeHours: 24,
+  minimumFileAgeUnit: "hours",
   scanIntervalMinutes: 60,
+  scanIntervalUnit: "minutes",
   eligibleCodecs: [
     "h264",
     "mpeg2video",

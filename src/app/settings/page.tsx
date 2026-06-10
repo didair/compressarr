@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Save } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,9 @@ import { requestJson } from "@/lib/client";
 
 interface Settings {
   minimumFileAgeHours: number;
+  minimumFileAgeUnit: MinimumFileAgeUnit;
   scanIntervalMinutes: number;
+  scanIntervalUnit: ScanIntervalUnit;
   eligibleCodecs: string[];
   qualityProfile: "high" | "balanced" | "compact";
   minimumSavingsPercent: number;
@@ -22,6 +25,23 @@ interface Settings {
   automaticRetryCount: number;
   queuePaused: boolean;
 }
+
+type MinimumFileAgeUnit = "minutes" | "hours" | "days" | "weeks" | "months";
+type ScanIntervalUnit = "minutes" | "hours" | "days";
+
+const minimumFileAgeFactors: Record<MinimumFileAgeUnit, number> = {
+  minutes: 1 / 60,
+  hours: 1,
+  days: 24,
+  weeks: 24 * 7,
+  months: 24 * 30,
+};
+
+const scanIntervalFactors: Record<ScanIntervalUnit, number> = {
+  minutes: 1,
+  hours: 60,
+  days: 60 * 24,
+};
 
 const codecs = [
   ["h264", "H.264 / AVC"],
@@ -40,10 +60,11 @@ const codecs = [
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    requestJson<Settings>("/api/settings").then(setSettings).catch((error) => setMessage(error.message));
+    requestJson<Settings>("/api/settings")
+      .then(setSettings)
+      .catch((error) => toast.error(error.message));
   }, []);
 
   async function submit(event: FormEvent) {
@@ -51,9 +72,9 @@ export default function SettingsPage() {
     if (!settings) return;
     try {
       setSettings(await requestJson("/api/settings", { method: "PUT", body: JSON.stringify(settings) }));
-      setMessage("Settings saved.");
+      toast.success("Settings saved.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save.");
+      toast.error(error instanceof Error ? error.message : "Failed to save.");
     }
   }
 
@@ -69,18 +90,81 @@ export default function SettingsPage() {
         description="Global discovery, quality, and scheduling preferences."
         actions={<Button type="submit"><Save className="size-4" /> Save changes</Button>}
       />
-      {message && <div className="rounded-lg border border-border bg-card p-3 text-sm">{message}</div>}
       <div className="grid gap-5 xl:grid-cols-2">
         <Card>
           <CardHeader><CardTitle>Discovery</CardTitle></CardHeader>
           <CardContent className="space-y-5">
             <Field label="Minimum file age" hint="Wait before new media can be queued.">
-              <Input type="number" min="0" value={settings.minimumFileAgeHours} onChange={(event) => numberField("minimumFileAgeHours", event.target.value)} />
-              <Suffix>hours</Suffix>
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={formatDurationValue(
+                  settings.minimumFileAgeHours /
+                    minimumFileAgeFactors[settings.minimumFileAgeUnit],
+                )}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    minimumFileAgeHours:
+                      Number(event.target.value) *
+                      minimumFileAgeFactors[settings.minimumFileAgeUnit],
+                  })
+                }
+              />
+              <UnitSelect
+                value={settings.minimumFileAgeUnit}
+                options={[
+                  ["minutes", "Minutes"],
+                  ["hours", "Hours"],
+                  ["days", "Days"],
+                  ["weeks", "Weeks"],
+                  ["months", "Months (30 days)"],
+                ]}
+                onChange={(unit) =>
+                  setSettings({
+                    ...settings,
+                    minimumFileAgeUnit: unit as MinimumFileAgeUnit,
+                  })
+                }
+              />
             </Field>
             <Field label="Scan interval" hint="How often enabled directories are checked.">
-              <Input type="number" min="1" value={settings.scanIntervalMinutes} onChange={(event) => numberField("scanIntervalMinutes", event.target.value)} />
-              <Suffix>minutes</Suffix>
+              <Input
+                type="number"
+                min={1 / scanIntervalFactors[settings.scanIntervalUnit]}
+                step="any"
+                value={formatDurationValue(
+                  settings.scanIntervalMinutes /
+                    scanIntervalFactors[settings.scanIntervalUnit],
+                )}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    scanIntervalMinutes: Math.max(
+                      1,
+                      Math.round(
+                        Number(event.target.value) *
+                          scanIntervalFactors[settings.scanIntervalUnit],
+                      ),
+                    ),
+                  })
+                }
+              />
+              <UnitSelect
+                value={settings.scanIntervalUnit}
+                options={[
+                  ["minutes", "Minutes"],
+                  ["hours", "Hours"],
+                  ["days", "Days"],
+                ]}
+                onChange={(unit) =>
+                  setSettings({
+                    ...settings,
+                    scanIntervalUnit: unit as ScanIntervalUnit,
+                  })
+                }
+              />
             </Field>
             <Field label="Automatic retries" hint="Retries after transient conversion failures.">
               <Input type="number" min="0" max="10" value={settings.automaticRetryCount} onChange={(event) => numberField("automaticRetryCount", event.target.value)} />
@@ -158,4 +242,32 @@ function Field({ label, hint, children }: { label: string; hint: string; childre
 
 function Suffix({ children }: { children: React.ReactNode }) {
   return <span className="min-w-16 text-xs text-muted-foreground">{children}</span>;
+}
+
+function UnitSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: readonly (readonly [string, string])[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className="h-10 min-w-32 rounded-lg border border-input bg-background px-3 text-sm"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {options.map(([optionValue, label]) => (
+        <option key={optionValue} value={optionValue}>
+          {label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function formatDurationValue(value: number): number {
+  return Number(value.toFixed(4));
 }

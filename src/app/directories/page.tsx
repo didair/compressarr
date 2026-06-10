@@ -1,158 +1,280 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowUp, Check, Folder, FolderPlus, RefreshCw, ScanSearch } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  LoaderCircle,
+} from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { requestJson } from "@/lib/client";
+import { formatBytes } from "@/lib/utils";
 
-interface Directory {
-  id: number;
-  path: string;
-  enabled: boolean;
-  discoveredCount: number;
-  lastScanCompletedAt: string | null;
-  lastScanError: string | null;
-}
-
-interface BrowseEntry {
+interface DirectoryNode {
   name: string;
   path: string;
+  directoryId: number | null;
   enabled: boolean;
   coveredBy: string | null;
+  sizeBytes: number;
+  mediaFileCount: number;
+  hasSubdirectories: boolean;
 }
 
 interface BrowseResult {
   path: string;
   parent: string | null;
-  entries: BrowseEntry[];
+  node: DirectoryNode;
+  entries: DirectoryNode[];
 }
 
 export default function DirectoriesPage() {
-  const [directories, setDirectories] = useState<Directory[]>([]);
-  const [browser, setBrowser] = useState<BrowseResult | null>(null);
-  const [error, setError] = useState("");
+  const [root, setRoot] = useState<DirectoryNode | null>(null);
+  const [children, setChildren] = useState<Record<string, DirectoryNode[]>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState<Set<string>>(new Set());
+  const [updating, setUpdating] = useState<Set<string>>(new Set());
 
-  const loadDirectories = useCallback(async () => {
-    setDirectories(await requestJson<Directory[]>("/api/directories"));
-  }, []);
-  const browse = useCallback(async (path?: string) => {
-    const suffix = path ? `?path=${encodeURIComponent(path)}` : "";
-    setBrowser(await requestJson<BrowseResult>(`/api/directories/browse${suffix}`));
+  const fetchDirectory = useCallback(async (directoryPath?: string) => {
+    const query = directoryPath
+      ? `?path=${encodeURIComponent(directoryPath)}`
+      : "";
+    return requestJson<BrowseResult>(`/api/directories/browse${query}`);
   }, []);
 
   useEffect(() => {
     const initial = setTimeout(() => {
-      Promise.all([loadDirectories(), browse()]).catch((caught) =>
-        setError(caught instanceof Error ? caught.message : "Failed to load."),
-      );
+      fetchDirectory()
+        .then((result) => {
+          setRoot(result.node);
+          setChildren({ [result.path]: result.entries });
+          setExpanded(
+            result.node.hasSubdirectories
+              ? new Set([result.path])
+              : new Set(),
+          );
+        })
+        .catch((caught) =>
+          toast.error(caught instanceof Error ? caught.message : "Failed to load."),
+        );
     }, 0);
     return () => clearTimeout(initial);
-  }, [browse, loadDirectories]);
+  }, [fetchDirectory]);
 
-  async function enable(path: string) {
-    try {
-      await requestJson("/api/directories", {
-        method: "POST",
-        body: JSON.stringify({ path }),
+  async function toggleExpanded(node: DirectoryNode) {
+    if (!node.hasSubdirectories) return;
+
+    if (expanded.has(node.path)) {
+      setExpanded((current) => {
+        const next = new Set(current);
+        next.delete(node.path);
+        return next;
       });
-      await Promise.all([loadDirectories(), browse(browser?.path)]);
+      return;
+    }
+
+    setExpanded((current) => new Set(current).add(node.path));
+    if (children[node.path]) return;
+
+    setLoading((current) => new Set(current).add(node.path));
+    try {
+      const result = await fetchDirectory(node.path);
+      setChildren((current) => ({ ...current, [node.path]: result.entries }));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action failed.");
+      toast.error(caught instanceof Error ? caught.message : "Failed to load.");
+    } finally {
+      setLoading((current) => {
+        const next = new Set(current);
+        next.delete(node.path);
+        return next;
+      });
     }
   }
 
-  async function update(id: number, enabled: boolean) {
-    await requestJson(`/api/directories/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled }),
-    });
-    await Promise.all([loadDirectories(), browse(browser?.path)]);
+  async function setEnabled(node: DirectoryNode, enabled: boolean) {
+    setUpdating((current) => new Set(current).add(node.path));
+    try {
+      if (node.directoryId == null) {
+        await requestJson("/api/directories", {
+          method: "POST",
+          body: JSON.stringify({ path: node.path }),
+        });
+      } else {
+        await requestJson(`/api/directories/${node.directoryId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled }),
+        });
+      }
+      await refreshLoadedDirectories();
+      toast.success(enabled ? "Directory enabled." : "Directory disabled.");
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Action failed.");
+    } finally {
+      setUpdating((current) => {
+        const next = new Set(current);
+        next.delete(node.path);
+        return next;
+      });
+    }
+  }
+
+  async function refreshLoadedDirectories() {
+    if (!root) return;
+    const loadedPaths = Object.keys(children);
+    const results = await Promise.all(
+      loadedPaths.map((directoryPath) => fetchDirectory(directoryPath)),
+    );
+    const nextChildren = { ...children };
+    for (const result of results) nextChildren[result.path] = result.entries;
+    setChildren(nextChildren);
+
+    const refreshedRoot = results.find((result) => result.path === root.path);
+    if (refreshedRoot) setRoot(refreshedRoot.node);
   }
 
   return (
     <>
       <PageHeader
         title="Media directories"
-        description="Choose folders below /media. Enabled folders are scanned recursively."
+        description="Choose which directories Compressarr should scan recursively."
       />
-      {error && <div className="rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
-      <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Browse media</span>
-              <Badge variant="outline">{browser?.path ?? "/media"}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y divide-border rounded-lg border border-border">
-              {browser?.parent && (
-                <button onClick={() => browse(browser.parent!)} className="flex w-full items-center gap-3 p-3 text-left text-sm hover:bg-accent">
-                  <ArrowUp className="size-4 text-muted-foreground" /> Parent directory
-                </button>
-              )}
-              {browser?.entries.map((entry) => (
-                <div key={entry.path} className="flex items-center gap-3 p-3">
-                  <button onClick={() => browse(entry.path)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <Folder className="size-4 shrink-0 text-primary" />
-                    <span className="truncate text-sm">{entry.name}</span>
-                  </button>
-                  {entry.enabled ? (
-                    <Badge variant="success"><Check className="mr-1 size-3" /> Enabled</Badge>
-                  ) : entry.coveredBy ? (
-                    <Badge variant="secondary">Covered</Badge>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => enable(entry.path)}>
-                      <FolderPlus className="size-3" /> Enable
-                    </Button>
-                  )}
-                </div>
-              ))}
-              {browser && browser.entries.length === 0 && (
-                <p className="p-8 text-center text-sm text-muted-foreground">No subdirectories found.</p>
-              )}
+      <Card className="min-h-[65vh] overflow-hidden">
+        <CardContent className="min-h-[calc(65vh-4rem)] p-3 sm:p-5">
+          {root ? (
+            <DirectoryRow
+              node={root}
+              depth={0}
+              expanded={expanded}
+              childMap={children}
+              loading={loading}
+              updating={updating}
+              onToggleExpanded={toggleExpanded}
+              onSetEnabled={setEnabled}
+            />
+          ) : (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" />
+              Loading media directories
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle>Managed directories</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {directories.map((directory) => (
-              <div key={directory.id} className="rounded-lg border border-border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{directory.path}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {directory.discoveredCount} media files · {directory.lastScanCompletedAt ? `scanned ${new Date(directory.lastScanCompletedAt).toLocaleString()}` : "scan pending"}
-                    </p>
-                    {directory.lastScanError && <p className="mt-1 text-xs text-red-400">{directory.lastScanError}</p>}
-                  </div>
-                  <Badge variant={directory.enabled ? "success" : "secondary"}>
-                    {directory.enabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="outline" disabled={!directory.enabled} onClick={() => requestJson(`/api/directories/${directory.id}/scan`, { method: "POST" })}>
-                    <ScanSearch className="size-3" /> Scan
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => update(directory.id, !directory.enabled)}>
-                    {directory.enabled ? "Disable" : "Enable"}
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!directories.length && (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                <RefreshCw className="mx-auto mb-3 size-5" /> No directories enabled.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </>
+  );
+}
+
+function DirectoryRow({
+  node,
+  depth,
+  expanded,
+  childMap,
+  loading,
+  updating,
+  onToggleExpanded,
+  onSetEnabled,
+}: {
+  node: DirectoryNode;
+  depth: number;
+  expanded: Set<string>;
+  childMap: Record<string, DirectoryNode[]>;
+  loading: Set<string>;
+  updating: Set<string>;
+  onToggleExpanded: (node: DirectoryNode) => Promise<void>;
+  onSetEnabled: (node: DirectoryNode, enabled: boolean) => Promise<void>;
+}) {
+  const isExpanded = expanded.has(node.path);
+  const isLoading = loading.has(node.path);
+  const childNodes = childMap[node.path];
+  const isUpdating = updating.has(node.path);
+
+  return (
+    <div>
+      <div
+        className="group flex min-h-14 items-center gap-3 rounded-md px-3 hover:bg-accent/70"
+        style={{ paddingLeft: `${depth * 24 + 12}px` }}
+      >
+        {node.hasSubdirectories ? (
+          <button
+            type="button"
+            className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.name}`}
+            onClick={() => void onToggleExpanded(node)}
+          >
+            {isLoading ? (
+              <LoaderCircle className="size-5 animate-spin" />
+            ) : isExpanded ? (
+              <ChevronDown className="size-5" />
+            ) : (
+              <ChevronRight className="size-5" />
+            )}
+          </button>
+        ) : (
+          <span className="size-8 shrink-0" aria-hidden="true" />
+        )}
+        <button
+          type="button"
+          disabled={!node.hasSubdirectories}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+          onClick={() => void onToggleExpanded(node)}
+        >
+          {isExpanded ? (
+            <FolderOpen className="size-5 shrink-0 text-primary" />
+          ) : (
+            <Folder className="size-5 shrink-0 text-primary" />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate text-base font-medium">{node.name}</span>
+            {node.mediaFileCount > 0 && (
+              <span className="block text-xs text-muted-foreground">
+                {node.mediaFileCount} media{" "}
+                {node.mediaFileCount === 1 ? "file" : "files"}
+              </span>
+            )}
+          </span>
+          {node.coveredBy && !node.enabled && (
+            <Badge variant="secondary" className="hidden shrink-0 sm:inline-flex">
+              Inherited
+            </Badge>
+          )}
+        </button>
+        <span className="w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground sm:w-28">
+          {formatBytes(node.sizeBytes)}
+        </span>
+        <Switch
+          checked={node.enabled}
+          disabled={isUpdating}
+          aria-label={`${node.enabled ? "Disable" : "Enable"} ${node.name}`}
+          title={
+            node.coveredBy && !node.enabled
+              ? `Already scanned through ${node.coveredBy}`
+              : undefined
+          }
+          onCheckedChange={(checked) => void onSetEnabled(node, checked)}
+        />
+      </div>
+      {isExpanded && (
+        <div>
+          {childNodes?.map((child) => (
+            <DirectoryRow
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              childMap={childMap}
+              loading={loading}
+              updating={updating}
+              onToggleExpanded={onToggleExpanded}
+              onSetEnabled={onSetEnabled}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

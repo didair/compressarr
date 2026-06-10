@@ -11,7 +11,7 @@ RUN pnpm install --frozen-lockfile
 FROM dependencies AS build
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm build
+RUN DATABASE_PATH=:memory: pnpm build
 
 FROM node:24-bookworm-slim AS runtime
 ARG VERSION
@@ -29,17 +29,13 @@ ENV NODE_ENV=production \
     MEDIA_ROOT=/media \
     MIGRATIONS_PATH=/app/drizzle \
     HOSTNAME=0.0.0.0 \
-    PORT=3000 \
-    PNPM_HOME=/pnpm \
-    PATH="/pnpm:$PATH"
+    PORT=3000
 
 RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
     && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg gosu \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 911 compressarr \
     && useradd --uid 911 --gid 911 --create-home compressarr \
-    && corepack enable \
-    && corepack prepare pnpm@11.5.2 --activate \
     && mkdir -p /config /media /app
 
 WORKDIR /app
@@ -56,4 +52,4 @@ RUN chmod +x /usr/local/bin/compressarr-entrypoint
 EXPOSE 3000
 VOLUME ["/config", "/media"]
 ENTRYPOINT ["compressarr-entrypoint"]
-CMD ["sh", "-c", "pnpm db:migrate && node server.js"]
+CMD ["sh", "-c", "./node_modules/.bin/tsx src/db/migrate.ts && node server.js"]

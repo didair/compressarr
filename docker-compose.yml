@@ -25,7 +25,7 @@ services:
     build: .
     container_name: compressarr-worker
     restart: unless-stopped
-    command: ["pnpm", "worker"]
+    command: ["./node_modules/.bin/tsx", "src/worker/index.ts"]
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}

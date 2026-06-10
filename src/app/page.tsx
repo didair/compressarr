@@ -11,13 +11,14 @@ import {
   ScanSearch,
   TriangleAlert,
 } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { requestJson } from "@/lib/client";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes, formatDuration } from "@/lib/utils";
 
 interface DashboardJob {
   id: number;
@@ -41,13 +42,14 @@ interface DashboardData {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [error, setError] = useState("");
   const load = useCallback(async () => {
     try {
       setData(await requestJson<DashboardData>("/api/dashboard"));
-      setError("");
+      toast.dismiss("dashboard-load-error");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to load.");
+      toast.error(caught instanceof Error ? caught.message : "Failed to load.", {
+        id: "dashboard-load-error",
+      });
     }
   }, []);
 
@@ -60,9 +62,14 @@ export default function DashboardPage() {
     };
   }, [load]);
 
-  async function action(url: string) {
-    await requestJson(url, { method: "POST" });
-    await load();
+  async function action(url: string, successMessage: string) {
+    try {
+      await requestJson(url, { method: "POST" });
+      await load();
+      toast.success(successMessage);
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : "Action failed.");
+    }
   }
 
   const metrics = [
@@ -99,13 +106,19 @@ export default function DashboardPage() {
         description="A live view of your media optimization workload."
         actions={
           <>
-            <Button variant="outline" onClick={() => action("/api/scans")}>
+            <Button
+              variant="outline"
+              onClick={() => action("/api/scans", "Scan requested.")}
+            >
               <ScanSearch className="size-4" /> Scan now
             </Button>
             <Button
               variant={data?.queuePaused ? "default" : "secondary"}
               onClick={() =>
-                action(data?.queuePaused ? "/api/queue/resume" : "/api/queue/pause")
+                action(
+                  data?.queuePaused ? "/api/queue/resume" : "/api/queue/pause",
+                  data?.queuePaused ? "Queue resumed." : "Queue paused.",
+                )
               }
             >
               {data?.queuePaused ? <Play className="size-4" /> : <Pause className="size-4" />}
@@ -114,9 +127,6 @@ export default function DashboardPage() {
           </>
         }
       />
-
-      {error && <div className="rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
-
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
           <Card key={metric.label}>
@@ -146,7 +156,10 @@ export default function DashboardPage() {
                 <Progress value={data.current.progressPercent} />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{(data.current.progressPercent ?? 0).toFixed(1)}%</span>
-                  <span>{data.current.speed ?? "Starting"} · {data.current.etaSeconds ?? "—"}s remaining</span>
+                  <span>
+                    {data.current.speed ?? "Starting"} ·{" "}
+                    {formatDuration(data.current.etaSeconds)} remaining
+                  </span>
                 </div>
               </div>
             ) : (
