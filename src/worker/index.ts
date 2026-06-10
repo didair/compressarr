@@ -10,6 +10,7 @@ import { isWithinSchedule } from "@/lib/schedule";
 import { getSettings } from "@/lib/settings";
 
 let stopping = false;
+let lastRecoveryAt = 0;
 
 process.on("SIGTERM", () => {
   stopping = true;
@@ -26,6 +27,10 @@ async function main(): Promise<void> {
   while (!stopping) {
     try {
       await fs.writeFile("/tmp/compressarr-worker-health", String(Date.now()));
+      if (Date.now() - lastRecoveryAt > 30_000) {
+        recoverInterruptedJobs();
+        lastRecoveryAt = Date.now();
+      }
       await runDueScan();
       const config = getSettings();
       if (!config.queuePaused && isWithinSchedule(config)) {

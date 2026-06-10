@@ -27,6 +27,7 @@ export const appSettingsSchema = z.object({
   scanIntervalUnit: z.enum(["minutes", "hours", "days"]),
   eligibleCodecs: z.array(z.string()).min(1),
   qualityProfile: z.enum(["high", "balanced", "compact"]),
+  maximumResolution: z.enum(["keep", "8k", "4k", "1080p", "720p"]),
   minimumSavingsPercent: z.number().min(0).max(99),
   scheduleEnabled: z.boolean(),
   scheduleStart: z.string().regex(timePattern),
@@ -34,6 +35,17 @@ export const appSettingsSchema = z.object({
   timezone: z.string().min(1),
   automaticRetryCount: z.number().int().min(0).max(10),
   queuePaused: z.boolean(),
+  nodeCoordinatorUrl: z.string().refine(
+    (value) => {
+      if (!value) return true;
+      try {
+        return ["http:", "https:"].includes(new URL(value).protocol);
+      } catch {
+        return false;
+      }
+    },
+    { message: "Coordinator URL must be a valid HTTP or HTTPS URL." },
+  ),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -55,6 +67,7 @@ export const defaultSettings: AppSettings = {
     "vp8",
   ],
   qualityProfile: "balanced",
+  maximumResolution: "keep",
   minimumSavingsPercent: 5,
   scheduleEnabled: false,
   scheduleStart: "00:00",
@@ -62,6 +75,7 @@ export const defaultSettings: AppSettings = {
   timezone: "Etc/UTC",
   automaticRetryCount: 2,
   queuePaused: false,
+  nodeCoordinatorUrl: "",
 };
 
 export function parseSettingValue<K extends keyof AppSettings>(
@@ -99,6 +113,10 @@ export function updateSettings(input: unknown): AppSettings {
 
   db.transaction((tx) => {
     for (const [key, settingValue] of Object.entries(value)) {
+      if (key === "maximumResolution" && settingValue === "keep") {
+        tx.delete(settings).where(eq(settings.key, key)).run();
+        continue;
+      }
       tx.insert(settings)
         .values({ key, value: JSON.stringify(settingValue), updatedAt: now })
         .onConflictDoUpdate({

@@ -1,6 +1,12 @@
 import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { db } from "@/db/client";
-import { directories, jobs, mediaFiles, type Job } from "@/db/schema";
+import {
+  directories,
+  jobs,
+  mediaFiles,
+  remoteNodes,
+  type Job,
+} from "@/db/schema";
 import { isPathCovered } from "./paths";
 
 export function claimNextJob(): Job | undefined {
@@ -32,12 +38,26 @@ export function claimNextJob(): Job | undefined {
 
 export function recoverInterruptedJobs(): void {
   const stale = new Date(Date.now() - 60_000);
+  const interruptedRemoteNodes = db
+    .select({ id: jobs.remoteNodeId })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.status, "running"),
+        or(lte(jobs.workerHeartbeatAt, stale), isNull(jobs.workerHeartbeatAt)),
+      ),
+    )
+    .all()
+    .flatMap((row) => (row.id == null ? [] : [row.id]));
   db.update(jobs)
     .set({
       status: "queued",
       availableAt: new Date(),
       startedAt: null,
       workerHeartbeatAt: null,
+      remoteNodeId: null,
+      leaseTokenHash: null,
+      leaseExpiresAt: null,
       errorCode: "WORKER_INTERRUPTED",
       errorMessage: "The worker stopped while this job was running.",
     })
@@ -48,6 +68,12 @@ export function recoverInterruptedJobs(): void {
       ),
     )
     .run();
+  for (const nodeId of interruptedRemoteNodes) {
+    db.update(remoteNodes)
+      .set({ status: "offline", currentJobId: null })
+      .where(eq(remoteNodes.id, nodeId))
+      .run();
+  }
 }
 
 export function cancelUncoveredQueuedJobs(disabledPath: string): void {

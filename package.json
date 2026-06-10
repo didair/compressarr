@@ -18,7 +18,9 @@
     "test": "vitest run",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "deploy": "node scripts/deploy-docker.mjs",
-    "deploy:dry-run": "node scripts/deploy-docker.mjs --dry-run"
+    "deploy:dry-run": "node scripts/deploy-docker.mjs --dry-run",
+    "node:pack": "pnpm --dir packages/compressarr-node pack",
+    "node:publish": "pnpm --dir packages/compressarr-node publish --access public"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.16",

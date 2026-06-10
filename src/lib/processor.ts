@@ -4,7 +4,12 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { jobs, type Job } from "@/db/schema";
-import { buildFfmpegArgs, outputPathFor, savingsPercent } from "./ffmpeg";
+import {
+  buildFfmpegArgs,
+  outputPathFor,
+  resolutionBounds,
+  savingsPercent,
+} from "./ffmpeg";
 import { probeMedia } from "./media";
 import { getSettings, isCodecEligible } from "./settings";
 
@@ -61,7 +66,12 @@ export async function processJob(job: Job): Promise<void> {
     await fs.rm(temporaryPath, { force: true });
     child = spawn(
       "ffmpeg",
-      buildFfmpegArgs(job.sourcePath, temporaryPath, job.qualityProfile),
+      buildFfmpegArgs(
+        job.sourcePath,
+        temporaryPath,
+        job.qualityProfile,
+        config.maximumResolution,
+      ),
       { stdio: ["ignore", "pipe", "pipe"] },
     );
 
@@ -103,7 +113,7 @@ export async function processJob(job: Job): Promise<void> {
     }
 
     const outputInfo = await probeMedia(temporaryPath);
-    validateOutput(currentMedia, outputInfo);
+    validateOutput(currentMedia, outputInfo, config.maximumResolution);
     const outputStat = await fs.stat(temporaryPath);
     const actualSavings = savingsPercent(sourceStat.size, outputStat.size);
     if (actualSavings < config.minimumSavingsPercent) {
@@ -231,6 +241,7 @@ function persistProgress(
 function validateOutput(
   source: Awaited<ReturnType<typeof probeMedia>>,
   output: Awaited<ReturnType<typeof probeMedia>>,
+  maximumResolution: ReturnType<typeof getSettings>["maximumResolution"],
 ): void {
   if (output.primaryVideoCodec !== "hevc") {
     throw new ProcessingError(
@@ -248,6 +259,37 @@ function validateOutput(
       "Output audio or subtitle stream counts do not match the source.",
       false,
     );
+  }
+  if (
+    maximumResolution === "keep" &&
+    (output.width !== source.width || output.height !== source.height)
+  ) {
+    throw new ProcessingError(
+      "VALIDATION_RESOLUTION",
+      "Output resolution differs from the source.",
+      false,
+    );
+  }
+  if (maximumResolution !== "keep") {
+    const bounds = resolutionBounds[maximumResolution];
+    if (output.width > bounds.width || output.height > bounds.height) {
+      throw new ProcessingError(
+        "VALIDATION_RESOLUTION",
+        "Output resolution exceeds the configured maximum.",
+        false,
+      );
+    }
+    if (
+      source.width <= bounds.width &&
+      source.height <= bounds.height &&
+      (output.width !== source.width || output.height !== source.height)
+    ) {
+      throw new ProcessingError(
+        "VALIDATION_RESOLUTION",
+        "Output resolution changed even though the source was below the configured maximum.",
+        false,
+      );
+    }
   }
   const tolerance = Math.max(1, source.durationSeconds * 0.001);
   if (Math.abs(output.durationSeconds - source.durationSeconds) > tolerance) {

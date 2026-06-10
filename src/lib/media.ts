@@ -23,6 +23,8 @@ export interface ProbeStream {
   index: number;
   codec_name?: string;
   codec_type?: "video" | "audio" | "subtitle" | "attachment" | "data";
+  width?: number;
+  height?: number;
   disposition?: { attached_pic?: number };
 }
 
@@ -40,6 +42,8 @@ export interface MediaInfo {
   durationSeconds: number;
   container: string;
   primaryVideoCodec: string;
+  width: number;
+  height: number;
   audioStreamCount: number;
   subtitleStreamCount: number;
   streams: ProbeStream[];
@@ -64,7 +68,13 @@ export async function probeMedia(filePath: string): Promise<MediaInfo> {
   const primary = videos[0];
   const duration = Number(parsed.format.duration);
 
-  if (!primary?.codec_name || !Number.isFinite(duration) || duration <= 0) {
+  if (
+    !primary?.codec_name ||
+    !primary.width ||
+    !primary.height ||
+    !Number.isFinite(duration) ||
+    duration <= 0
+  ) {
     throw new MediaProbeError("No valid primary video stream was found.");
   }
 
@@ -72,6 +82,8 @@ export async function probeMedia(filePath: string): Promise<MediaInfo> {
     durationSeconds: duration,
     container: parsed.format.format_name ?? "unknown",
     primaryVideoCodec: primary.codec_name.toLowerCase(),
+    width: primary.width,
+    height: primary.height,
     audioStreamCount: parsed.streams.filter(
       (stream) => stream.codec_type === "audio",
     ).length,

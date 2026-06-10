@@ -1,4 +1,5 @@
 import type { QualityProfile } from "@/db/schema";
+import type { AppSettings } from "./settings";
 
 export const qualityCrf: Record<QualityProfile, number> = {
   high: 18,
@@ -6,12 +7,23 @@ export const qualityCrf: Record<QualityProfile, number> = {
   compact: 26,
 };
 
+export const resolutionBounds: Record<
+  Exclude<AppSettings["maximumResolution"], "keep">,
+  { width: number; height: number }
+> = {
+  "8k": { width: 7680, height: 4320 },
+  "4k": { width: 3840, height: 2160 },
+  "1080p": { width: 1920, height: 1080 },
+  "720p": { width: 1280, height: 720 },
+};
+
 export function buildFfmpegArgs(
   sourcePath: string,
   temporaryPath: string,
   profile: QualityProfile,
+  maximumResolution: AppSettings["maximumResolution"],
 ): string[] {
-  return [
+  const args = [
     "-hide_banner",
     "-nostdin",
     "-y",
@@ -37,6 +49,15 @@ export function buildFfmpegArgs(
     "medium",
     "-crf",
     String(qualityCrf[profile]),
+  ];
+  if (maximumResolution !== "keep") {
+    const bounds = resolutionBounds[maximumResolution];
+    args.push(
+      "-filter:v:0",
+      `scale=${bounds.width}:${bounds.height}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
+    );
+  }
+  args.push(
     "-max_muxing_queue_size",
     "4096",
     "-progress",
@@ -45,7 +66,8 @@ export function buildFfmpegArgs(
     "-f",
     "matroska",
     temporaryPath,
-  ];
+  );
+  return args;
 }
 
 export function outputPathFor(sourcePath: string): string {

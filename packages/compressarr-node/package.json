@@ -1,0 +1,20 @@
+{
+  "name": "compressarr-node",
+  "version": "0.1.0",
+  "description": "Remote transcoding agent for Compressarr",
+  "type": "module",
+  "bin": {
+    "compressarr-node": "./bin/compressarr-node.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

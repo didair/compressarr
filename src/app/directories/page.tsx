@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  CircleCheck,
+  CircleDashed,
   ChevronDown,
   ChevronRight,
+  Clock3,
+  EyeOff,
+  FileWarning,
+  FileVideo2,
   Folder,
   FolderOpen,
   LoaderCircle,
+  ListVideo,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
@@ -34,12 +41,33 @@ interface BrowseResult {
   entries: DirectoryNode[];
 }
 
+interface MediaFile {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  codec: string | null;
+  status: string;
+  detail: string | null;
+  progressPercent: number | null;
+}
+
+interface DirectoryFilesResult {
+  path: string;
+  watched: boolean;
+  files: MediaFile[];
+}
+
 export default function DirectoriesPage() {
   const [root, setRoot] = useState<DirectoryNode | null>(null);
   const [children, setChildren] = useState<Record<string, DirectoryNode[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [updating, setUpdating] = useState<Set<string>>(new Set());
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] =
+    useState<DirectoryFilesResult | null>(null);
+  const [filesLoading, setFilesLoading] = useState(false);
 
   const fetchDirectory = useCallback(async (directoryPath?: string) => {
     const query = directoryPath
@@ -54,6 +82,8 @@ export default function DirectoriesPage() {
         .then((result) => {
           setRoot(result.node);
           setChildren({ [result.path]: result.entries });
+          setSelectedPath(result.path);
+          void loadFiles(result.path);
           setExpanded(
             result.node.hasSubdirectories
               ? new Set([result.path])
@@ -66,6 +96,23 @@ export default function DirectoriesPage() {
     }, 0);
     return () => clearTimeout(initial);
   }, [fetchDirectory]);
+
+  async function loadFiles(directoryPath: string) {
+    setSelectedPath(directoryPath);
+    setFilesLoading(true);
+    try {
+      const result = await requestJson<DirectoryFilesResult>(
+        `/api/directories/files?path=${encodeURIComponent(directoryPath)}`,
+      );
+      setSelectedFiles(result);
+    } catch (caught) {
+      toast.error(
+        caught instanceof Error ? caught.message : "Failed to inspect media.",
+      );
+    } finally {
+      setFilesLoading(false);
+    }
+  }
 
   async function toggleExpanded(node: DirectoryNode) {
     if (!node.hasSubdirectories) return;
@@ -112,6 +159,7 @@ export default function DirectoriesPage() {
         });
       }
       await refreshLoadedDirectories();
+      if (selectedPath) await loadFiles(selectedPath);
       toast.success(enabled ? "Directory enabled." : "Directory disabled.");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Action failed.");
@@ -142,27 +190,57 @@ export default function DirectoriesPage() {
     <>
       <PageHeader
         title="Media directories"
-        description="Choose which directories Compressarr should scan recursively."
+        description="Manage watched folders and inspect how every media file is handled."
+        eyebrow="Library"
       />
-      <Card className="min-h-[65vh] overflow-hidden">
-        <CardContent className="min-h-[calc(65vh-4rem)] p-3 sm:p-5">
-          {root ? (
-            <DirectoryRow
-              node={root}
-              depth={0}
-              expanded={expanded}
-              childMap={children}
-              loading={loading}
-              updating={updating}
-              onToggleExpanded={toggleExpanded}
-              onSetEnabled={setEnabled}
-            />
-          ) : (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <LoaderCircle className="size-4 animate-spin" />
-              Loading media directories
+      <Card className="min-h-[68vh] overflow-hidden lg:h-[calc(100dvh-13rem)] lg:min-h-[36rem]">
+        <CardContent className="grid min-h-[68vh] p-0 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(320px,0.85fr)_minmax(480px,1.35fr)]">
+          <div className="border-b border-border/80 p-3 sm:p-5 lg:border-r lg:border-b-0">
+            <div className="mb-3 flex items-center justify-between px-2">
+              <div>
+                <p className="text-sm font-semibold">Folders</p>
+              </div>
             </div>
-          )}
+            {root ? (
+              <DirectoryRow
+                node={root}
+                depth={0}
+                expanded={expanded}
+                childMap={children}
+                loading={loading}
+                updating={updating}
+                selectedPath={selectedPath}
+                onToggleExpanded={toggleExpanded}
+                onSetEnabled={setEnabled}
+                onSelect={loadFiles}
+              />
+            ) : (
+              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                <LoaderCircle className="size-4 animate-spin" />
+                Loading media directories
+              </div>
+            )}
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-col bg-background/20">
+            <div className="flex min-h-16 shrink-0 items-center justify-between border-b border-border/80 px-5">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">
+                  {selectedPath?.split("/").pop() ?? "Media files"}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {selectedPath ?? "Select a directory"}
+                </p>
+              </div>
+              {selectedFiles && (
+                <Badge variant={selectedFiles.watched ? "success" : "secondary"}>
+                  {selectedFiles.watched ? "Watched" : "Not watched"}
+                </Badge>
+              )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <MediaFileList result={selectedFiles} loading={filesLoading} />
+            </div>
+          </div>
         </CardContent>
       </Card>
     </>
@@ -176,8 +254,10 @@ function DirectoryRow({
   childMap,
   loading,
   updating,
+  selectedPath,
   onToggleExpanded,
   onSetEnabled,
+  onSelect,
 }: {
   node: DirectoryNode;
   depth: number;
@@ -185,8 +265,10 @@ function DirectoryRow({
   childMap: Record<string, DirectoryNode[]>;
   loading: Set<string>;
   updating: Set<string>;
+  selectedPath: string | null;
   onToggleExpanded: (node: DirectoryNode) => Promise<void>;
   onSetEnabled: (node: DirectoryNode, enabled: boolean) => Promise<void>;
+  onSelect: (path: string) => Promise<void>;
 }) {
   const isExpanded = expanded.has(node.path);
   const isLoading = loading.has(node.path);
@@ -196,7 +278,11 @@ function DirectoryRow({
   return (
     <div>
       <div
-        className="group flex min-h-14 items-center gap-3 rounded-md px-3 hover:bg-accent/70"
+        className={`group flex min-h-14 items-center gap-2 rounded-xl px-2 transition-colors ${
+          selectedPath === node.path
+            ? "bg-primary/10 ring-1 ring-primary/20"
+            : "hover:bg-accent/70"
+        }`}
         style={{ paddingLeft: `${depth * 24 + 12}px` }}
       >
         {node.hasSubdirectories ? (
@@ -219,9 +305,8 @@ function DirectoryRow({
         )}
         <button
           type="button"
-          disabled={!node.hasSubdirectories}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
-          onClick={() => void onToggleExpanded(node)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={() => void onSelect(node.path)}
         >
           {isExpanded ? (
             <FolderOpen className="size-5 shrink-0 text-primary" />
@@ -269,12 +354,124 @@ function DirectoryRow({
               childMap={childMap}
               loading={loading}
               updating={updating}
+              selectedPath={selectedPath}
               onToggleExpanded={onToggleExpanded}
               onSetEnabled={onSetEnabled}
+              onSelect={onSelect}
             />
           ))}
         </div>
       )}
     </div>
   );
+}
+
+function MediaFileList({
+  result,
+  loading,
+}: {
+  result: DirectoryFilesResult | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+        <LoaderCircle className="size-4 animate-spin" />
+        Inspecting media files
+      </div>
+    );
+  }
+
+  if (!result?.files.length) {
+    return (
+      <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+        <div className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-secondary text-muted-foreground">
+          <ListVideo className="size-5" />
+        </div>
+        <p className="text-sm font-medium">No media files in this folder</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Files inside subdirectories are shown when you select those folders.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-border/70">
+      {result.files.map((file) => {
+        const presentation = fileStatus(file.status);
+        const StatusIcon = presentation.icon;
+        return (
+          <div
+            key={file.path}
+            className="grid gap-3 px-5 py-4 hover:bg-accent/30 sm:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <div className="flex min-w-0 gap-3">
+              <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary">
+                <FileVideo2 className="size-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium" title={file.name}>
+                  {file.name}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatBytes(file.sizeBytes)}
+                  {file.codec ? ` · ${file.codec.toUpperCase()}` : ""}
+                  {" · "}
+                  {new Date(file.modifiedAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+
+            <Badge
+              variant={presentation.variant}
+              className="h-fit shrink-0 gap-1.5 justify-self-start sm:justify-self-end"
+            >
+              <StatusIcon className="size-3" />
+              {presentation.label}
+            </Badge>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function fileStatus(status: string): {
+  label: string;
+  variant: "default" | "secondary" | "success" | "warning" | "destructive";
+  icon: typeof CircleCheck;
+} {
+  if (status === "efficient" || status === "completed") {
+    return {
+      label: status === "efficient" ? "Already efficient" : "Completed",
+      variant: "success",
+      icon: CircleCheck,
+    };
+  }
+  if (status === "queued" || status === "running") {
+    return {
+      label: status === "running" ? "Converting" : "Queued",
+      variant: "default",
+      icon: Clock3,
+    };
+  }
+  if (status === "not_watched") {
+    return { label: "Not watched", variant: "secondary", icon: EyeOff };
+  }
+  if (status === "waiting" || status === "not_queued") {
+    return {
+      label: status === "waiting" ? "Waiting" : "Not queued",
+      variant: "warning",
+      icon: CircleDashed,
+    };
+  }
+  if (status === "failed" || status === "unreadable") {
+    return { label: "Needs attention", variant: "destructive", icon: FileWarning };
+  }
+  return {
+    label: status[0]?.toUpperCase() + status.slice(1),
+    variant: "secondary",
+    icon: CircleDashed,
+  };
 }

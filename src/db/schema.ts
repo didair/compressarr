@@ -81,6 +81,22 @@ export type JobStatus = (typeof jobStatuses)[number];
 export const qualityProfiles = ["high", "balanced", "compact"] as const;
 export type QualityProfile = (typeof qualityProfiles)[number];
 
+export const remoteNodes = sqliteTable(
+  "remote_nodes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    hostname: text("hostname").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    version: text("version"),
+    status: text("status").notNull().default("offline"),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+    currentJobId: integer("current_job_id"),
+    ...timestamps,
+  },
+  (table) => [index("remote_nodes_last_seen_idx").on(table.lastSeenAt)],
+);
+
 export const jobs = sqliteTable(
   "jobs",
   {
@@ -109,6 +125,11 @@ export const jobs = sqliteTable(
     workerHeartbeatAt: integer("worker_heartbeat_at", {
       mode: "timestamp_ms",
     }),
+    remoteNodeId: integer("remote_node_id").references(() => remoteNodes.id, {
+      onDelete: "set null",
+    }),
+    leaseTokenHash: text("lease_token_hash"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
     startedAt: integer("started_at", { mode: "timestamp_ms" }),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
     errorCode: text("error_code"),
@@ -118,6 +139,7 @@ export const jobs = sqliteTable(
   (table) => [
     index("jobs_status_available_idx").on(table.status, table.availableAt),
     index("jobs_created_idx").on(table.createdAt),
+    index("jobs_remote_node_idx").on(table.remoteNodeId),
     uniqueIndex("jobs_one_active_media_idx")
       .on(table.mediaFileId)
       .where(sql`${table.status} in ('queued', 'running')`),
@@ -127,3 +149,4 @@ export const jobs = sqliteTable(
 export type Directory = typeof directories.$inferSelect;
 export type MediaFile = typeof mediaFiles.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
+export type RemoteNode = typeof remoteNodes.$inferSelect;
