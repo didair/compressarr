@@ -9,6 +9,7 @@ import {
   Play,
   RefreshCw,
   ScanSearch,
+  ServerCog,
   TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,8 +41,19 @@ interface DashboardData {
   queuePaused: boolean;
 }
 
+interface RemoteNode {
+  id: number;
+  name: string;
+  hostname: string;
+  version: string | null;
+  status: string;
+  lastSeenAt: string | null;
+  currentJobId: number | null;
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [nodes, setNodes] = useState<RemoteNode[]>([]);
   const load = useCallback(async () => {
     try {
       setData(await requestJson<DashboardData>("/api/dashboard"));
@@ -53,14 +65,31 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadNodes = useCallback(async () => {
+    try {
+      const result = await requestJson<{ nodes: RemoteNode[] }>("/api/nodes");
+      setNodes(result.nodes);
+      toast.dismiss("dashboard-nodes-error");
+    } catch (caught) {
+      toast.error(
+        caught instanceof Error ? caught.message : "Failed to load nodes.",
+        { id: "dashboard-nodes-error" },
+      );
+    }
+  }, []);
+
   useEffect(() => {
     const initial = setTimeout(() => void load(), 0);
     const polling = setInterval(() => void load(), 3_000);
+    const initialNodes = setTimeout(() => void loadNodes(), 0);
+    const nodePolling = setInterval(() => void loadNodes(), 10_000);
     return () => {
       clearTimeout(initial);
       clearInterval(polling);
+      clearTimeout(initialNodes);
+      clearInterval(nodePolling);
     };
-  }, [load]);
+  }, [load, loadNodes]);
 
   async function action(url: string, successMessage: string) {
     try {
@@ -187,6 +216,51 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between border-b border-border">
+          <CardTitle className="flex items-center gap-2">
+            <ServerCog className="size-4 text-primary" />
+            Registered nodes
+          </CardTitle>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void loadNodes()}
+          >
+            <RefreshCw className="size-3" />
+            Refresh
+          </Button>
+        </CardHeader>
+        <CardContent className="divide-y divide-border p-0">
+          {nodes.map((node) => (
+            <div
+              key={node.id}
+              className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{node.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {node.hostname}
+                  {node.version ? ` · v${node.version}` : ""}
+                  {node.currentJobId ? ` · Processing job ${node.currentJobId}` : ""}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {node.lastSeenAt
+                    ? `Last seen ${new Date(node.lastSeenAt).toLocaleString()}`
+                    : "Never connected"}
+                </p>
+              </div>
+              <NodeStatus status={node.status} />
+            </div>
+          ))}
+          {!nodes.length && (
+            <p className="px-6 py-10 text-center text-sm text-muted-foreground">
+              No remote nodes registered.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </>
   );
 }
@@ -194,5 +268,15 @@ export default function DashboardPage() {
 function StatusBadge({ status }: { status: string }) {
   const variant =
     status === "completed" ? "success" : status === "failed" ? "destructive" : "warning";
+  return <Badge variant={variant}>{status}</Badge>;
+}
+
+function NodeStatus({ status }: { status: string }) {
+  const variant =
+    status === "working"
+      ? "default"
+      : status === "idle"
+        ? "success"
+        : "secondary";
   return <Badge variant={variant}>{status}</Badge>;
 }

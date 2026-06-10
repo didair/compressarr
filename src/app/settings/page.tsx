@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Copy, RefreshCw, Save, ServerCog } from "lucide-react";
+import { Copy, Save, ServerCog } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -31,15 +31,6 @@ interface Settings {
 interface NodeData {
   coordinatorUrl: string;
   command: string;
-  nodes: Array<{
-    id: number;
-    name: string;
-    hostname: string;
-    version: string | null;
-    status: string;
-    lastSeenAt: string | null;
-    currentJobId: number | null;
-  }>;
 }
 
 type MinimumFileAgeUnit = "minutes" | "hours" | "days" | "weeks" | "months";
@@ -83,8 +74,6 @@ export default function SettingsPage() {
       .then(setSettings)
       .catch((error) => toast.error(error.message));
     void loadNodes();
-    const polling = setInterval(() => void loadNodes(), 10_000);
-    return () => clearInterval(polling);
   }, []);
 
   async function loadNodes() {
@@ -205,117 +194,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ServerCog className="size-4 text-primary" />
-              Remote transcoding nodes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <Field
-              label="Coordinator URL"
-              hint="Use an address remote hosts can reach, including http:// or https:// and the port."
-            >
-              <Input
-                type="url"
-                placeholder="http://192.168.1.20:3000"
-                value={settings.nodeCoordinatorUrl}
-                onChange={(event) =>
-                  setSettings({
-                    ...settings,
-                    nodeCoordinatorUrl: event.target.value,
-                  })
-                }
-              />
-            </Field>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium">Enrollment command</p>
-                  <p className="text-xs text-muted-foreground">
-                    Install with npm, then run this command on the transcoding host.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={!nodeData?.command}
-                  onClick={async () => {
-                    if (!nodeData?.command) return;
-                    await navigator.clipboard.writeText(nodeData.command);
-                    toast.success("Enrollment command copied.");
-                  }}
-                >
-                  <Copy className="size-3" />
-                  Copy
-                </Button>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-border bg-background/70 p-4 font-mono text-xs text-primary">
-                <div>npm install -g compressarr-node</div>
-                <div className="mt-2 whitespace-nowrap">
-                  {nodeData?.command ?? "Generating enrollment command..."}
-                </div>
-              </div>
-              {nodeData?.coordinatorUrl.includes("127.0.0.1") ||
-              nodeData?.coordinatorUrl.includes("localhost") ? (
-                <p className="text-xs text-amber-400">
-                  Localhost cannot be reached from another computer. Set a LAN
-                  address or externally accessible URL above and save settings.
-                </p>
-              ) : null}
-            </div>
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-sm font-medium">Registered nodes</p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void loadNodes()}
-                >
-                  <RefreshCw className="size-3" />
-                  Refresh
-                </Button>
-              </div>
-              <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-                {nodeData?.nodes.map((node) => (
-                  <div
-                    key={node.id}
-                    className="flex items-center justify-between gap-4 px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{node.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {node.hostname}
-                        {node.version ? ` · v${node.version}` : ""}
-                        {node.currentJobId ? ` · Job ${node.currentJobId}` : ""}
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        node.status === "working"
-                          ? "bg-primary/15 text-primary"
-                          : node.status === "idle"
-                            ? "bg-emerald-500/15 text-emerald-400"
-                            : "bg-secondary text-muted-foreground"
-                      }`}
-                    >
-                      {node.status}
-                    </span>
-                  </div>
-                ))}
-                {!nodeData?.nodes.length && (
-                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    No remote nodes registered.
-                  </p>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         <Card>
           <CardHeader><CardTitle>Encoding</CardTitle></CardHeader>
           <CardContent className="space-y-5">
@@ -396,6 +274,68 @@ export default function SettingsPage() {
               <span>Timezone</span>
               <Input value={settings.timezone} placeholder="Etc/UTC" onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />
             </label>
+          </CardContent>
+        </Card>
+
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ServerCog className="size-4 text-primary" />
+              Remote transcoding nodes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Field
+              label="Coordinator URL"
+              hint="Use an address remote hosts can reach, including http:// or https:// and the port."
+            >
+              <Input
+                type="url"
+                placeholder="http://192.168.1.20:3000"
+                value={settings.nodeCoordinatorUrl}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    nodeCoordinatorUrl: event.target.value,
+                  })
+                }
+              />
+            </Field>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Enrollment command</p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!nodeData?.command}
+                  onClick={async () => {
+                    if (!nodeData?.command) return;
+                    await navigator.clipboard.writeText(nodeData.command);
+                    toast.success("Enrollment command copied.");
+                  }}
+                >
+                  <Copy className="size-3" />
+                  Copy
+                </Button>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-border bg-background/70 p-4 font-mono text-xs text-primary">
+                <div># install cli or run with npx compressarr-node</div>
+                <div className="mt-2">npm install -g compressarr-node</div>
+                <div className="mt-2 whitespace-nowrap">
+                  {nodeData?.command ?? "Generating enrollment command..."}
+                </div>
+              </div>
+              {nodeData?.coordinatorUrl.includes("127.0.0.1") ||
+              nodeData?.coordinatorUrl.includes("localhost") ? (
+                <p className="text-xs text-amber-400">
+                  Localhost cannot be reached from another computer. Set a LAN
+                  address or externally accessible URL above and save settings.
+                </p>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
       </div>
