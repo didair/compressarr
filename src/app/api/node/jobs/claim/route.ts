@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { jobs, remoteNodes } from "@/db/schema";
 import { apiError } from "@/lib/api";
 import { authenticateNode, hashSecret } from "@/lib/node-auth";
+import { isJobClaimConflict } from "@/lib/queue";
 import { qualityCrf, resolutionBounds } from "@/lib/ffmpeg";
 import { isWithinSchedule } from "@/lib/schedule";
 import { getSettings } from "@/lib/settings";
@@ -27,33 +28,72 @@ export async function POST(request: Request) {
         .run();
       return new Response(null, { status: 204 });
     }
-    const leaseToken = randomBytes(32).toString("base64url");
-    const claimed = db.transaction((tx) => {
-      const candidate = tx
-        .select()
-        .from(jobs)
-        .where(and(eq(jobs.status, "queued"), lte(jobs.availableAt, now)))
-        .orderBy(asc(jobs.priority), asc(jobs.createdAt))
-        .get();
-      if (!candidate) return undefined;
-
-      return tx
-        .update(jobs)
+    const activeJob = db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.status, "running"),
+          eq(jobs.remoteNodeId, node.id),
+        ),
+      )
+      .get();
+    if (activeJob) {
+      db.update(remoteNodes)
         .set({
-          status: "running",
-          startedAt: now,
-          workerHeartbeatAt: now,
-          remoteNodeId: node.id,
-          leaseTokenHash: hashSecret(leaseToken),
-          leaseExpiresAt: new Date(now.getTime() + 60_000),
-          attemptCount: candidate.attemptCount + 1,
-          errorCode: null,
-          errorMessage: null,
+          status: "working",
+          currentJobId: activeJob.id,
+          lastSeenAt: now,
         })
-        .where(and(eq(jobs.id, candidate.id), eq(jobs.status, "queued")))
-        .returning()
-        .get();
-    });
+        .where(eq(remoteNodes.id, node.id))
+        .run();
+      return new Response(null, { status: 204 });
+    }
+
+    const leaseToken = randomBytes(32).toString("base64url");
+    let claimed;
+    try {
+      claimed = db.transaction((tx) => {
+        const running = tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.status, "running"),
+              eq(jobs.remoteNodeId, node.id),
+            ),
+          )
+          .get();
+        if (running) return undefined;
+
+        const candidate = tx
+          .select()
+          .from(jobs)
+          .where(and(eq(jobs.status, "queued"), lte(jobs.availableAt, now)))
+          .orderBy(asc(jobs.priority), asc(jobs.createdAt))
+          .get();
+        if (!candidate) return undefined;
+
+        return tx
+          .update(jobs)
+          .set({
+            status: "running",
+            startedAt: now,
+            workerHeartbeatAt: now,
+            remoteNodeId: node.id,
+            leaseTokenHash: hashSecret(leaseToken),
+            leaseExpiresAt: new Date(now.getTime() + 60_000),
+            attemptCount: candidate.attemptCount + 1,
+            errorCode: null,
+            errorMessage: null,
+          })
+          .where(and(eq(jobs.id, candidate.id), eq(jobs.status, "queued")))
+          .returning()
+          .get();
+      });
+    } catch (error) {
+      if (!isJobClaimConflict(error)) throw error;
+    }
 
     db.update(remoteNodes)
       .set({

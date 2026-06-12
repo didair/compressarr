@@ -28,13 +28,21 @@ export async function GET() {
       .select()
       .from(jobs)
       .where(eq(jobs.status, "running"))
-      .get();
+      .orderBy(desc(jobs.startedAt))
+      .all();
     const recent = db
       .select()
       .from(jobs)
       .where(sql`${jobs.status} in ('completed', 'failed', 'skipped')`)
       .orderBy(desc(jobs.completedAt))
       .limit(8)
+      .all();
+    const failed = db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.status, "failed"))
+      .orderBy(desc(jobs.completedAt))
+      .limit(5)
       .all();
 
     return Response.json({
@@ -43,6 +51,7 @@ export async function GET() {
       completedCount: totals?.completed ?? 0,
       current,
       recent,
+      failed,
       queuePaused: getSettings().queuePaused,
     });
   } catch (error) {

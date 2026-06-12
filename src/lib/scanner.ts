@@ -3,13 +3,13 @@ import path from "node:path";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { directories, jobs, mediaFiles, type Directory } from "@/db/schema";
+import { isDirectoryWatched } from "./directory-rules";
 import { outputPathFor } from "./ffmpeg";
 import { probeMedia } from "./media";
 import { canonicalMediaPath } from "./paths";
 import { getSettings, isCodecEligible } from "./settings";
+import { isCompressarrTemporaryFile } from "./temp-files";
 import { videoExtensions } from "./media";
-
-const temporaryMarker = ".compressarr-";
 
 export async function scanDirectory(directory: Directory): Promise<number> {
   const startedAt = new Date();
@@ -25,7 +25,8 @@ export async function scanDirectory(directory: Directory): Promise<number> {
   let discovered = 0;
   try {
     const root = await canonicalMediaPath(directory.path);
-    for await (const filePath of walkVideoFiles(root)) {
+    const rules = db.select().from(directories).all();
+    for await (const filePath of walkVideoFiles(root, rules)) {
       if (await discoverFile(directory, filePath)) discovered += 1;
     }
     db.update(directories)
@@ -34,16 +35,41 @@ export async function scanDirectory(directory: Directory): Promise<number> {
       .run();
     return discovered;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown scan error";
+    const missing = isMissingPathError(error);
+    const message = missing
+      ? "Directory no longer exists and was automatically disabled."
+      : error instanceof Error
+        ? error.message
+        : "Unknown scan error";
     db.update(directories)
-      .set({ lastScanCompletedAt: new Date(), lastScanError: message })
+      .set({
+        enabled: missing ? false : directory.enabled,
+        scanRequestedAt: null,
+        lastScanCompletedAt: new Date(),
+        lastScanError: message,
+      })
       .where(eq(directories.id, directory.id))
       .run();
+    if (missing) {
+      console.warn(`Disabled missing media directory: ${directory.path}`);
+      return discovered;
+    }
     throw error;
   }
 }
 
-async function* walkVideoFiles(root: string): AsyncGenerator<string> {
+function isMissingPathError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+async function* walkVideoFiles(
+  root: string,
+  rules: Directory[],
+): AsyncGenerator<string> {
   const pending = [root];
   while (pending.length > 0) {
     const current = pending.pop()!;
@@ -56,10 +82,11 @@ async function* walkVideoFiles(root: string): AsyncGenerator<string> {
     for await (const entry of handle) {
       const entryPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        pending.push(entryPath);
+        if (isDirectoryWatched(entryPath, rules)) pending.push(entryPath);
       } else if (
         entry.isFile() &&
-        !entry.name.includes(temporaryMarker) &&
+        isDirectoryWatched(entryPath, rules) &&
+        !isCompressarrTemporaryFile(entry.name) &&
         videoExtensions.has(path.extname(entry.name).toLowerCase())
       ) {
         yield entryPath;

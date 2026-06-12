@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { directories, mediaFiles } from "@/db/schema";
 import { apiError } from "@/lib/api";
 import { canonicalMediaPath } from "@/lib/paths";
+import { cancelUncoveredQueuedJobs } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
 
@@ -35,17 +36,27 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = z.object({ path: z.string().min(1) }).parse(await request.json());
+    const body = z
+      .object({ path: z.string().min(1), enabled: z.boolean().default(true) })
+      .parse(await request.json());
     const canonical = await canonicalMediaPath(body.path);
     const directory = db
       .insert(directories)
-      .values({ path: canonical, enabled: true, scanRequestedAt: new Date() })
+      .values({
+        path: canonical,
+        enabled: body.enabled,
+        scanRequestedAt: body.enabled ? new Date() : null,
+      })
       .onConflictDoUpdate({
         target: directories.path,
-        set: { enabled: true, scanRequestedAt: new Date() },
+        set: {
+          enabled: body.enabled,
+          scanRequestedAt: body.enabled ? new Date() : null,
+        },
       })
       .returning()
       .get();
+    if (!body.enabled) cancelUncoveredQueuedJobs(canonical);
     return Response.json(directory, { status: 201 });
   } catch (error) {
     return apiError(error);

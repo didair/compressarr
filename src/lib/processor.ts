@@ -12,15 +12,20 @@ import {
 } from "./ffmpeg";
 import { probeMedia } from "./media";
 import { getSettings, isCodecEligible } from "./settings";
+import {
+  cleanupTemporaryFilesForSource,
+  temporaryPathForSource,
+} from "./temp-files";
 
 export async function processJob(job: Job): Promise<void> {
-  const temporaryPath = temporaryPathFor(job.sourcePath);
+  const temporaryPath = temporaryPathForSource(job.sourcePath, String(process.pid));
   const finalPath = outputPathFor(job.sourcePath);
   let child: ChildProcess | undefined;
   let heartbeat: NodeJS.Timeout | undefined;
   let cancellation: NodeJS.Timeout | undefined;
 
   try {
+    await cleanupTemporaryFilesForSource(job.sourcePath);
     const config = getSettings();
     const sourceStat = await fs.stat(job.sourcePath);
     const sourceFingerprint = `${sourceStat.size}:${Math.floor(sourceStat.mtimeMs)}`;
@@ -166,6 +171,7 @@ export async function processJob(job: Job): Promise<void> {
   } finally {
     if (heartbeat) clearInterval(heartbeat);
     if (cancellation) clearInterval(cancellation);
+    await cleanupTemporaryFilesForSource(job.sourcePath).catch(() => undefined);
   }
 }
 
@@ -352,13 +358,6 @@ function completeJob(
     })
     .where(eq(jobs.id, jobId))
     .run();
-}
-
-function temporaryPathFor(sourcePath: string): string {
-  return path.join(
-    path.dirname(sourcePath),
-    `.${path.basename(sourcePath)}.compressarr-${process.pid}.tmp.mkv`,
-  );
 }
 
 async function exists(candidate: string): Promise<boolean> {

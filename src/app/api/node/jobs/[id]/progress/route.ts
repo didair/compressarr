@@ -29,10 +29,12 @@ export async function POST(
     }
     const progress = progressSchema.parse(await request.json());
     heartbeatRemoteJob(lease.node.id, lease.job.id);
-    db.update(jobs)
-      .set(progress)
-      .where(eq(jobs.id, lease.job.id))
-      .run();
+    if (Object.keys(progress).length > 0) {
+      db.update(jobs)
+        .set(progress)
+        .where(eq(jobs.id, lease.job.id))
+        .run();
+    }
     const cancellationRequested = db
       .select({ value: jobs.cancellationRequestedAt })
       .from(jobs)

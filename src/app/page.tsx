@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  RotateCcw,
   ScanSearch,
   ServerCog,
   TriangleAlert,
@@ -36,8 +37,9 @@ interface DashboardData {
   counts: Record<string, number>;
   savedBytes: number;
   completedCount: number;
-  current: DashboardJob | null;
+  current: DashboardJob[];
   recent: DashboardJob[];
+  failed: DashboardJob[];
   queuePaused: boolean;
 }
 
@@ -170,26 +172,30 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <Card>
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <RefreshCw className={`size-4 text-primary ${data?.current ? "animate-spin" : ""}`} />
-              Current conversion
+              <RefreshCw className={`size-4 text-primary ${data?.current.length ? "animate-spin" : ""}`} />
+              Current conversions
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {data?.current ? (
-              <div className="space-y-4">
-                <p className="truncate text-sm font-medium">{data.current.sourcePath}</p>
-                <Progress value={data.current.progressPercent} />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{(data.current.progressPercent ?? 0).toFixed(1)}%</span>
-                  <span>
-                    {data.current.speed ?? "Starting"} ·{" "}
-                    {formatDuration(data.current.etaSeconds)} remaining
-                  </span>
-                </div>
+            {data?.current.length ? (
+              <div className="divide-y divide-border">
+                {data.current.map((job) => (
+                  <div key={job.id} className="space-y-4 py-4 first:pt-0 last:pb-0">
+                    <p className="truncate text-sm font-medium">{job.sourcePath}</p>
+                    <Progress value={job.progressPercent} />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>{(job.progressPercent ?? 0).toFixed(1)}%</span>
+                      <span>
+                        {job.speed ?? "Starting"} ·{" "}
+                        {formatDuration(job.etaSeconds)} remaining
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="py-10 text-center text-sm text-muted-foreground">
@@ -199,23 +205,72 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader><CardTitle>Recent activity</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="flex min-w-0 flex-col gap-3">
             {data?.recent.length ? data.recent.map((job) => (
-              <div key={job.id} className="flex items-center justify-between gap-3 border-b border-border pb-3 last:border-0">
+              <div key={job.id} className="flex min-w-0 items-center justify-between gap-3 border-b border-border pb-3 last:border-0">
                 <div className="min-w-0">
-                  <p className="truncate text-sm">{job.sourcePath.split("/").pop()}</p>
+                  <p
+                    className="truncate text-sm"
+                    title={job.sourcePath.split("/").pop()}
+                  >
+                    {job.sourcePath.split("/").pop()}
+                  </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {job.status === "completed" ? `${formatBytes(job.savedBytes)} saved` : job.errorMessage}
                   </p>
                 </div>
-                <StatusBadge status={job.status} />
+                <div className="shrink-0">
+                  <StatusBadge status={job.status} />
+                </div>
               </div>
             )) : <p className="py-8 text-center text-sm text-muted-foreground">No completed work yet.</p>}
           </CardContent>
         </Card>
       </div>
+
+      {data?.failed.length ? (
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <TriangleAlert className="size-4 text-destructive" />
+              Failed jobs
+            </CardTitle>
+            <Badge variant="destructive">{data.failed.length}</Badge>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {data.failed.map((job) => (
+              <div
+                key={job.id}
+                className="flex items-center justify-between gap-4 border-b border-border py-2 last:border-0"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {job.sourcePath.split("/").pop()}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {job.errorMessage ?? "Conversion failed."}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    action(
+                      `/api/jobs/${job.id}/retry`,
+                      "Job added back to the queue.",
+                    )
+                  }
+                >
+                  <RotateCcw data-icon="inline-start" />
+                  Retry
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between border-b border-border">

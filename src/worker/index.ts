@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { db, sqlite } from "@/db/client";
-import { directories } from "@/db/schema";
+import { directories, jobs } from "@/db/schema";
 import { claimNextJob, recoverInterruptedJobs } from "@/lib/queue";
 import { processJob } from "@/lib/processor";
 import { scanDirectory } from "@/lib/scanner";
@@ -21,6 +21,7 @@ process.on("SIGINT", () => {
 
 async function main(): Promise<void> {
   recoverInterruptedJobs();
+  await disableMissingDirectories();
   await cleanupTemporaryFiles();
   console.log("Compressarr worker started.");
 
@@ -36,7 +37,24 @@ async function main(): Promise<void> {
       if (!config.queuePaused && isWithinSchedule(config)) {
         const job = claimNextJob();
         if (job) {
+          console.log(`Starting job ${job.id}: ${path.basename(job.sourcePath)}`);
           await processJob(job);
+          const result = db
+            .select({
+              status: jobs.status,
+              savedBytes: jobs.savedBytes,
+              errorMessage: jobs.errorMessage,
+            })
+            .from(jobs)
+            .where(eq(jobs.id, job.id))
+            .get();
+          const detail =
+            result?.status === "completed"
+              ? `, saved ${formatBytes(result.savedBytes ?? 0)}`
+              : result?.errorMessage
+                ? `: ${result.errorMessage}`
+                : "";
+          console.log(`Finished job ${job.id} (${result?.status ?? "unknown"})${detail}`);
           continue;
         }
       }
@@ -48,6 +66,33 @@ async function main(): Promise<void> {
 
   sqlite.close();
   console.log("Compressarr worker stopped.");
+}
+
+async function disableMissingDirectories(): Promise<void> {
+  const enabled = db
+    .select()
+    .from(directories)
+    .where(eq(directories.enabled, true))
+    .all();
+
+  for (const directory of enabled) {
+    try {
+      await fs.access(directory.path);
+    } catch (error) {
+      if (!isMissingPathError(error)) continue;
+      db.update(directories)
+        .set({
+          enabled: false,
+          scanRequestedAt: null,
+          lastScanCompletedAt: new Date(),
+          lastScanError:
+            "Directory no longer exists and was automatically disabled.",
+        })
+        .where(eq(directories.id, directory.id))
+        .run();
+      console.warn(`Disabled missing media directory: ${directory.path}`);
+    }
+  }
 }
 
 async function runDueScan(): Promise<void> {
@@ -105,6 +150,25 @@ async function cleanup(root: string, cutoff: number): Promise<void> {
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (Math.abs(value) >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 main().catch((error) => {

@@ -15,6 +15,20 @@
       "when": 1781120539686,
       "tag": "0001_sleepy_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781286176966,
+      "tag": "0002_single_running_job",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1781287362851,
+      "tag": "0003_flowery_christian_walker",
+      "breakpoints": true
     }
   ]
 }

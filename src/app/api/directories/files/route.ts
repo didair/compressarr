@@ -4,9 +4,11 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { directories, jobs, mediaFiles } from "@/db/schema";
 import { apiError } from "@/lib/api";
+import { isDirectoryWatched } from "@/lib/directory-rules";
 import { probeMedia, videoExtensions } from "@/lib/media";
-import { canonicalMediaPath, isPathCovered } from "@/lib/paths";
+import { canonicalMediaPath } from "@/lib/paths";
 import { getSettings, isCodecEligible } from "@/lib/settings";
+import { isCompressarrTemporaryFile } from "@/lib/temp-files";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +21,8 @@ export async function GET(request: Request) {
     const entries = await fs.readdir(/* turbopackIgnore: true */ directoryPath, {
       withFileTypes: true,
     });
-    const enabledDirectories = db
-      .select({ path: directories.path })
-      .from(directories)
-      .where(eq(directories.enabled, true))
-      .all();
-    const watched = enabledDirectories.some((directory) =>
-      isPathCovered(directoryPath, directory.path),
-    );
+    const directoryRules = db.select().from(directories).all();
+    const watched = isDirectoryWatched(directoryPath, directoryRules);
     const config = getSettings();
     const files = [];
 
@@ -34,6 +30,7 @@ export async function GET(request: Request) {
       .filter(
         (item) =>
           item.isFile() &&
+          !isCompressarrTemporaryFile(item.name) &&
           videoExtensions.has(path.extname(item.name).toLowerCase()),
       )
       .sort((left, right) => left.name.localeCompare(right.name))) {

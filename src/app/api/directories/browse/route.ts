@@ -3,8 +3,9 @@ import path from "node:path";
 import { db } from "@/db/client";
 import { directories } from "@/db/schema";
 import { apiError } from "@/lib/api";
+import { controllingDirectory } from "@/lib/directory-rules";
 import { videoExtensions } from "@/lib/media";
-import { canonicalMediaPath, isPathCovered, mediaRoot } from "@/lib/paths";
+import { canonicalMediaPath, mediaRoot } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +29,6 @@ export async function GET(request: Request) {
       withFileTypes: true,
     });
     const managed = db.select().from(directories).all();
-    const enabled = managed
-      .filter((directory) => directory.enabled)
-      .sort((left, right) => right.path.length - left.path.length);
     const children = await Promise.all(
       entries
         .filter((entry) => entry.isDirectory())
@@ -39,7 +37,7 @@ export async function GET(request: Request) {
           const candidate = path.join(canonical, entry.name);
           const resolved = await canonicalMediaPath(candidate).catch(() => null);
           if (!resolved) return null;
-          return describeDirectory(resolved, entry.name, managed, enabled);
+          return describeDirectory(resolved, entry.name, managed);
         }),
     );
     const root = await fs.realpath(/* turbopackIgnore: true */ mediaRoot);
@@ -50,7 +48,6 @@ export async function GET(request: Request) {
         canonical,
         canonical === root ? path.basename(root) || root : path.basename(canonical),
         managed,
-        enabled,
       ),
       entries: children.filter(Boolean),
     });
@@ -63,22 +60,22 @@ async function describeDirectory(
   directoryPath: string,
   name: string,
   managed: typeof directories.$inferSelect[],
-  enabled: typeof directories.$inferSelect[],
 ) {
   const exact = managed.find((directory) => directory.path === directoryPath);
-  const covering = enabled.find(
-    (directory) =>
-      directory.path !== directoryPath &&
-      isPathCovered(directoryPath, directory.path),
+  const controller = controllingDirectory(
+    directoryPath,
+    managed.filter((directory) => directory.path !== directoryPath),
   );
+  const effectiveEnabled = exact?.enabled ?? controller?.enabled ?? false;
 
   const stats = await getDirectoryStats(directoryPath);
   return {
     name,
     path: directoryPath,
     directoryId: exact?.id ?? null,
-    enabled: exact?.enabled ?? false,
-    coveredBy: covering?.path ?? null,
+    enabled: effectiveEnabled,
+    explicitEnabled: exact?.enabled ?? null,
+    coveredBy: exact ? null : controller?.path ?? null,
     ...stats,
   };
 }

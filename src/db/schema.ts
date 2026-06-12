@@ -143,6 +143,12 @@ export const jobs = sqliteTable(
     uniqueIndex("jobs_one_active_media_idx")
       .on(table.mediaFileId)
       .where(sql`${table.status} in ('queued', 'running')`),
+    uniqueIndex("jobs_one_running_local_idx")
+      .on(sql`1`)
+      .where(sql`${table.status} = 'running' and ${table.remoteNodeId} is null`),
+    uniqueIndex("jobs_one_running_remote_node_idx")
+      .on(table.remoteNodeId)
+      .where(sql`${table.status} = 'running' and ${table.remoteNodeId} is not null`),
   ],
 );
 

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import { jobs } from "@/db/schema";
@@ -15,16 +15,31 @@ export async function POST(
       .set({
         status: "queued",
         availableAt: new Date(),
+        attemptCount: 0,
+        startedAt: null,
         completedAt: null,
         cancellationRequestedAt: null,
+        workerHeartbeatAt: null,
+        remoteNodeId: null,
+        leaseTokenHash: null,
+        leaseExpiresAt: null,
         progressPercent: null,
+        speed: null,
+        etaSeconds: null,
+        outputSizeBytes: null,
+        savedBytes: null,
         errorCode: null,
         errorMessage: null,
       })
-      .where(and(eq(jobs.id, id), eq(jobs.status, "failed")))
+      .where(
+        and(
+          eq(jobs.id, id),
+          inArray(jobs.status, ["failed", "skipped", "cancelled"]),
+        ),
+      )
       .returning()
       .get();
-    if (!updated) return notFound("Failed job not found.");
+    if (!updated) return notFound("Recoverable job not found.");
     return Response.json(updated);
   } catch (error) {
     return apiError(error);

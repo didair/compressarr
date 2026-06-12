@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
-import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { eq } from "drizzle-orm";
@@ -16,6 +15,10 @@ import {
   releaseRemoteNode,
 } from "@/lib/remote-jobs";
 import { getSettings } from "@/lib/settings";
+import {
+  cleanupTemporaryFilesForSource,
+  temporaryPathForSource,
+} from "@/lib/temp-files";
 
 export async function PUT(
   request: Request,
@@ -55,10 +58,10 @@ export async function PUT(
       );
     }
 
-    temporaryPath = path.join(
-      /* turbopackIgnore: true */
-      path.dirname(lease.job.sourcePath),
-      `.${path.basename(lease.job.sourcePath)}.compressarr-remote-${id}.tmp.mkv`,
+    await cleanupTemporaryFilesForSource(lease.job.sourcePath);
+    temporaryPath = temporaryPathForSource(
+      lease.job.sourcePath,
+      `remote-${id}`,
     );
     await fsPromises.rm(/* turbopackIgnore: true */ temporaryPath, {
       force: true,
@@ -69,6 +72,22 @@ export async function PUT(
         flags: "wx",
       }),
     );
+    const cancelled = db
+      .select({ requestedAt: jobs.cancellationRequestedAt })
+      .from(jobs)
+      .where(eq(jobs.id, id))
+      .get()?.requestedAt;
+    if (cancelled) {
+      await fsPromises.rm(/* turbopackIgnore: true */ temporaryPath, {
+        force: true,
+      });
+      completeRemoteJob(id, "cancelled", {
+        errorCode: "CANCELLED_BY_USER",
+        errorMessage: "Cancelled by user.",
+      });
+      releaseRemoteNode(lease.node.id);
+      return Response.json({ status: "cancelled" });
+    }
 
     const settings = getSettings();
     const sourceInfo = await probeMedia(lease.job.sourcePath);
@@ -201,7 +220,7 @@ function validateRemoteOutput(
 
 function completeRemoteJob(
   jobId: number,
-  status: "completed" | "skipped",
+  status: "completed" | "skipped" | "cancelled",
   values: Partial<typeof jobs.$inferInsert>,
 ): void {
   db.update(jobs)

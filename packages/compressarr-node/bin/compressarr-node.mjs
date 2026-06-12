@@ -9,7 +9,7 @@ import process from "node:process";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const version = "0.1.0";
+const version = "0.1.1";
 const configDirectory =
   process.platform === "win32"
     ? path.join(process.env.APPDATA ?? os.homedir(), "compressarr-node")
@@ -141,7 +141,7 @@ async function processJob(config, claim) {
   try {
     status(`Job ${job.id} · downloading ${job.sourceName}`);
     heartbeat = setInterval(
-      () => void reportProgress(config, job.id, leaseToken, {}),
+      () => void sendHeartbeat(config, job.id, leaseToken),
       15_000,
     );
     const sourceResponse = await api(
@@ -163,7 +163,7 @@ async function processJob(config, claim) {
 
     status(`Job ${job.id} · uploading result`);
     heartbeat = setInterval(
-      () => void reportProgress(config, job.id, leaseToken, {}),
+      () => void sendHeartbeat(config, job.id, leaseToken),
       15_000,
     );
     const resultResponse = await api(
@@ -284,6 +284,8 @@ async function transcode(config, job, leaseToken, sourcePath, outputPath) {
               if (response.cancel && activeChild?.exitCode === null) {
                 activeChild.kill("SIGTERM");
               }
+            }).catch((error) => {
+              status(`Job ${job.id} · progress update failed · ${error.message}`);
             });
             lastReport = now;
           }
@@ -333,6 +335,14 @@ async function reportProgress(config, jobId, leaseToken, progress) {
   );
   await assertOk(response);
   return response.json();
+}
+
+async function sendHeartbeat(config, jobId, leaseToken) {
+  try {
+    await reportProgress(config, jobId, leaseToken, {});
+  } catch (error) {
+    status(`Job ${jobId} · heartbeat failed · ${error.message}`);
+  }
 }
 
 async function reportFailure(config, jobId, leaseToken, error) {

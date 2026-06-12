@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { jobs } from "@/db/schema";
 import { apiError, notFound } from "@/lib/api";
+import { cleanupTemporaryFilesForSource } from "@/lib/temp-files";
 
 export async function POST(
   _request: Request,
@@ -31,6 +32,9 @@ export async function POST(
       .where(eq(jobs.id, id))
       .returning()
       .get();
+    if (current.status === "queued") {
+      await cleanupTemporaryFilesForSource(current.sourcePath);
+    }
     return Response.json(updated);
   } catch (error) {
     return apiError(error);

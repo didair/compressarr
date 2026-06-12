@@ -28,6 +28,7 @@ interface DirectoryNode {
   path: string;
   directoryId: number | null;
   enabled: boolean;
+  explicitEnabled: boolean | null;
   coveredBy: string | null;
   sizeBytes: number;
   mediaFileCount: number;
@@ -150,7 +151,7 @@ export default function DirectoriesPage() {
       if (node.directoryId == null) {
         await requestJson("/api/directories", {
           method: "POST",
-          body: JSON.stringify({ path: node.path }),
+          body: JSON.stringify({ path: node.path, enabled }),
         });
       } else {
         await requestJson(`/api/directories/${node.directoryId}`, {
@@ -322,7 +323,7 @@ function DirectoryRow({
               </span>
             )}
           </span>
-          {node.coveredBy && !node.enabled && (
+          {node.explicitEnabled == null && node.enabled && (
             <Badge variant="secondary" className="hidden shrink-0 sm:inline-flex">
               Inherited
             </Badge>
@@ -336,8 +337,10 @@ function DirectoryRow({
           disabled={isUpdating}
           aria-label={`${node.enabled ? "Disable" : "Enable"} ${node.name}`}
           title={
-            node.coveredBy && !node.enabled
-              ? `Already scanned through ${node.coveredBy}`
+            node.explicitEnabled == null && node.enabled && node.coveredBy
+              ? `Enabled through ${node.coveredBy}. Turn off to exclude this directory.`
+              : node.explicitEnabled === false
+                ? "This directory is explicitly excluded."
               : undefined
           }
           onCheckedChange={(checked) => void onSetEnabled(node, checked)}

@@ -138,15 +138,16 @@ export default function QueuePage() {
                           <Ban className="size-3" /> Cancel
                         </Button>
                       )}
-                      {job.status === "failed" && (
+                      {["failed", "skipped", "cancelled"].includes(job.status) && (
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() =>
-                            action(`/api/jobs/${job.id}/retry`, "Job queued for retry.")
+                            action(`/api/jobs/${job.id}/retry`, "Job added back to the queue.")
                           }
                         >
-                          <RotateCcw className="size-3" /> Retry
+                          <RotateCcw data-icon="inline-start" />
+                          {job.status === "failed" ? "Retry" : "Requeue"}
                         </Button>
                       )}
                       {["completed", "failed", "skipped", "cancelled"].includes(job.status) && (
