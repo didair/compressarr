@@ -42,6 +42,12 @@ interface BrowseResult {
   entries: DirectoryNode[];
 }
 
+interface DirectoryRecord {
+  id: number;
+  path: string;
+  enabled: boolean;
+}
+
 interface MediaFile {
   name: string;
   path: string;
@@ -148,19 +154,25 @@ export default function DirectoriesPage() {
   async function setEnabled(node: DirectoryNode, enabled: boolean) {
     setUpdating((current) => new Set(current).add(node.path));
     try {
-      if (node.directoryId == null) {
-        await requestJson("/api/directories", {
-          method: "POST",
-          body: JSON.stringify({ path: node.path, enabled }),
-        });
-      } else {
-        await requestJson(`/api/directories/${node.directoryId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ enabled }),
-        });
+      const directory = await requestJson<DirectoryRecord>("/api/directories", {
+        method: "POST",
+        body: JSON.stringify({ path: node.path, enabled }),
+      });
+      const updated = updateDirectoryTree(root, children, directory);
+      setRoot(updated.root);
+      setChildren(updated.children);
+      if (selectedPath) {
+        const selected = findDirectoryNode(
+          updated.root,
+          updated.children,
+          selectedPath,
+        );
+        if (selected) {
+          setSelectedFiles((current) =>
+            current ? { ...current, watched: selected.enabled } : current,
+          );
+        }
       }
-      await refreshLoadedDirectories();
-      if (selectedPath) await loadFiles(selectedPath);
       toast.success(enabled ? "Directory enabled." : "Directory disabled.");
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : "Action failed.");
@@ -171,20 +183,6 @@ export default function DirectoriesPage() {
         return next;
       });
     }
-  }
-
-  async function refreshLoadedDirectories() {
-    if (!root) return;
-    const loadedPaths = Object.keys(children);
-    const results = await Promise.all(
-      loadedPaths.map((directoryPath) => fetchDirectory(directoryPath)),
-    );
-    const nextChildren = { ...children };
-    for (const result of results) nextChildren[result.path] = result.entries;
-    setChildren(nextChildren);
-
-    const refreshedRoot = results.find((result) => result.path === root.path);
-    if (refreshedRoot) setRoot(refreshedRoot.node);
   }
 
   return (
@@ -248,6 +246,68 @@ export default function DirectoriesPage() {
       </Card>
     </>
   );
+}
+
+function updateDirectoryTree(
+  root: DirectoryNode | null,
+  children: Record<string, DirectoryNode[]>,
+  updated: DirectoryRecord,
+) {
+  const nodes = [
+    ...(root ? [root] : []),
+    ...Object.values(children).flat(),
+  ];
+  const rules = new Map<string, { id: number; enabled: boolean }>();
+
+  for (const node of nodes) {
+    if (node.directoryId != null && node.explicitEnabled != null) {
+      rules.set(node.path, {
+        id: node.directoryId,
+        enabled: node.explicitEnabled,
+      });
+    }
+  }
+  rules.set(updated.path, { id: updated.id, enabled: updated.enabled });
+
+  const updateNode = (node: DirectoryNode): DirectoryNode => {
+    const exact = rules.get(node.path);
+    const controller = [...rules.entries()]
+      .filter(([rulePath]) => isPathCovered(node.path, rulePath))
+      .sort(([left], [right]) => right.length - left.length)[0];
+
+    return {
+      ...node,
+      directoryId: exact?.id ?? null,
+      enabled: controller?.[1].enabled ?? false,
+      explicitEnabled: exact?.enabled ?? null,
+      coveredBy: exact ? null : (controller?.[0] ?? null),
+    };
+  };
+
+  return {
+    root: root ? updateNode(root) : null,
+    children: Object.fromEntries(
+      Object.entries(children).map(([directoryPath, entries]) => [
+        directoryPath,
+        entries.map(updateNode),
+      ]),
+    ),
+  };
+}
+
+function findDirectoryNode(
+  root: DirectoryNode | null,
+  children: Record<string, DirectoryNode[]>,
+  directoryPath: string,
+) {
+  if (root?.path === directoryPath) return root;
+  return Object.values(children)
+    .flat()
+    .find((node) => node.path === directoryPath);
+}
+
+function isPathCovered(candidate: string, rulePath: string) {
+  return candidate === rulePath || candidate.startsWith(`${rulePath}/`);
 }
 
 function DirectoryRow({
