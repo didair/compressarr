@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FolderCog, Gauge, ListVideo, Settings, Shrink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/version";
 
 const navigation = [
   { href: "/", label: "Dashboard", icon: Gauge },
@@ -16,7 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   return (
     <div className="min-h-screen bg-background">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-sidebar lg:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-sidebar lg:flex">
         <div className="flex h-20 items-center gap-3 px-6">
           <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Shrink className="size-5" />
@@ -45,6 +46,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        <div className="mt-auto border-t border-border px-6 py-4 text-xs text-muted-foreground">
+          Version {APP_VERSION}
+        </div>
       </aside>
       <main className="pb-20 lg:ml-64 lg:pb-0">
         <div className="mx-auto max-w-7xl space-y-7 p-4 sm:p-7 lg:p-10">{children}</div>
@@ -67,6 +71,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           );
         })}
+        <div className="flex min-w-16 flex-col items-center gap-1 text-[10px] text-muted-foreground">
+          <span className="font-medium">Version</span>
+          <span>{APP_VERSION}</span>
+        </div>
       </nav>
     </div>
   );

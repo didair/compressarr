@@ -8,6 +8,7 @@ import { processJob } from "@/lib/processor";
 import { scanDirectory } from "@/lib/scanner";
 import { isWithinSchedule } from "@/lib/schedule";
 import { getSettings } from "@/lib/settings";
+import { APP_VERSION } from "@/lib/version";
 
 let stopping = false;
 let lastRecoveryAt = 0;
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
   await cleanupTemporaryFiles();
   await writeHealth();
   const health = setInterval(() => void writeHealth(), 10_000);
-  console.log("Compressarr worker started.");
+  console.log(`Compressarr worker v${APP_VERSION} started.`);
 
   try {
     while (!stopping) {
