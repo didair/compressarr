@@ -3,6 +3,7 @@ node_modules
 coverage
 playwright-report
 test-results
+runtime
 data
 *.sqlite
 *.sqlite-shm

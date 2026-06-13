@@ -1,7 +1,9 @@
-FROM node:24-bookworm-slim AS base
+FROM node:24-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable && corepack prepare pnpm@11.5.2 --activate
+RUN apk add --no-cache python3 make g++ \
+    && corepack enable \
+    && corepack prepare pnpm@11.5.2 --activate
 WORKDIR /app
 
 FROM base AS dependencies
@@ -11,9 +13,10 @@ RUN pnpm install --frozen-lockfile
 FROM dependencies AS build
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN DATABASE_PATH=:memory: pnpm build
+RUN DATABASE_PATH=:memory: pnpm build \
+    && pnpm build:runtime
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-alpine AS runtime
 ARG VERSION
 ARG REVISION
 LABEL org.opencontainers.image.title="Compressarr" \
@@ -29,27 +32,22 @@ ENV NODE_ENV=production \
     MEDIA_ROOT=/media \
     MIGRATIONS_PATH=/app/drizzle \
     HOSTNAME=0.0.0.0 \
-    PORT=3000
+    PORT=3000 \
+    HOME=/config
 
-RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
-    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg gosu \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 911 compressarr \
-    && useradd --uid 911 --gid 911 --create-home compressarr \
+RUN apk add --no-cache ffmpeg su-exec tzdata \
     && mkdir -p /config /media /app
 
 WORKDIR /app
-COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
-COPY --from=build /app/src ./src
 COPY --from=build /app/drizzle ./drizzle
-COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/tsconfig.json ./
+COPY --from=build /app/runtime ./runtime
 COPY docker/entrypoint.sh /usr/local/bin/compressarr-entrypoint
 RUN chmod +x /usr/local/bin/compressarr-entrypoint
 
 EXPOSE 3000
 VOLUME ["/config", "/media"]
 ENTRYPOINT ["compressarr-entrypoint"]
-CMD ["sh", "-c", "./node_modules/.bin/tsx src/db/migrate.ts && node server.js"]
+CMD ["sh", "-c", "node runtime/migrate.cjs && node server.js"]

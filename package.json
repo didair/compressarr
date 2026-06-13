@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:runtime": "node scripts/build-runtime.mjs",
     "start": "next start",
     "worker": "tsx src/worker/index.ts",
     "db:generate": "drizzle-kit generate",
@@ -48,6 +49,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.10",
+    "esbuild": "^0.28.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.7",
     "postcss": "^8.5.15",

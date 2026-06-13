@@ -23,49 +23,60 @@ async function main(): Promise<void> {
   recoverInterruptedJobs();
   await disableMissingDirectories();
   await cleanupTemporaryFiles();
+  await writeHealth();
+  const health = setInterval(() => void writeHealth(), 10_000);
   console.log("Compressarr worker started.");
 
-  while (!stopping) {
-    try {
-      await fs.writeFile("/tmp/compressarr-worker-health", String(Date.now()));
-      if (Date.now() - lastRecoveryAt > 30_000) {
-        recoverInterruptedJobs();
-        lastRecoveryAt = Date.now();
-      }
-      await runDueScan();
-      const config = getSettings();
-      if (!config.queuePaused && isWithinSchedule(config)) {
-        const job = claimNextJob();
-        if (job) {
-          console.log(`Starting job ${job.id}: ${path.basename(job.sourcePath)}`);
-          await processJob(job);
-          const result = db
-            .select({
-              status: jobs.status,
-              savedBytes: jobs.savedBytes,
-              errorMessage: jobs.errorMessage,
-            })
-            .from(jobs)
-            .where(eq(jobs.id, job.id))
-            .get();
-          const detail =
-            result?.status === "completed"
-              ? `, saved ${formatBytes(result.savedBytes ?? 0)}`
-              : result?.errorMessage
-                ? `: ${result.errorMessage}`
-                : "";
-          console.log(`Finished job ${job.id} (${result?.status ?? "unknown"})${detail}`);
-          continue;
+  try {
+    while (!stopping) {
+      try {
+        if (Date.now() - lastRecoveryAt > 30_000) {
+          recoverInterruptedJobs();
+          lastRecoveryAt = Date.now();
         }
+        await runDueScan();
+        const config = getSettings();
+        if (!config.queuePaused && isWithinSchedule(config)) {
+          const job = claimNextJob();
+          if (job) {
+            console.log(`Starting job ${job.id}: ${path.basename(job.sourcePath)}`);
+            await processJob(job);
+            const result = db
+              .select({
+                status: jobs.status,
+                savedBytes: jobs.savedBytes,
+                errorMessage: jobs.errorMessage,
+              })
+              .from(jobs)
+              .where(eq(jobs.id, job.id))
+              .get();
+            const detail =
+              result?.status === "completed"
+                ? `, saved ${formatBytes(result.savedBytes ?? 0)}`
+                : result?.errorMessage
+                  ? `: ${result.errorMessage}`
+                  : "";
+            console.log(`Finished job ${job.id} (${result?.status ?? "unknown"})${detail}`);
+            continue;
+          }
+        }
+      } catch (error) {
+        console.error("Worker iteration failed:", error);
       }
-    } catch (error) {
-      console.error("Worker iteration failed:", error);
+      await sleep(2_000);
     }
-    await sleep(2_000);
+  } finally {
+    clearInterval(health);
   }
 
   sqlite.close();
   console.log("Compressarr worker stopped.");
+}
+
+async function writeHealth(): Promise<void> {
+  await fs
+    .writeFile("/tmp/compressarr-worker-health", String(Date.now()))
+    .catch((error) => console.error("Failed to update worker health:", error));
 }
 
 async function disableMissingDirectories(): Promise<void> {
