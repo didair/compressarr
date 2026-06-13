@@ -20,7 +20,6 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "deploy": "node scripts/deploy-docker.mjs",
     "deploy:dry-run": "node scripts/deploy-docker.mjs --dry-run",
-    "node:pack": "pnpm --dir packages/compressarr-node pack",
     "node:publish": "pnpm --dir packages/compressarr-node publish --access public --no-git-checks"
   },
   "dependencies": {
