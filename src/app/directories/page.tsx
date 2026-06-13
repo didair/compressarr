@@ -196,31 +196,33 @@ export default function DirectoriesPage() {
       />
       <Card className="min-h-[68vh] overflow-hidden lg:h-[calc(100dvh-13rem)] lg:min-h-[36rem]">
         <CardContent className="grid min-h-[68vh] p-0 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(320px,0.85fr)_minmax(480px,1.35fr)]">
-          <div className="border-b border-border/80 p-3 sm:p-5 lg:border-r lg:border-b-0">
-            <div className="mb-3 flex items-center justify-between px-2">
+          <div className="flex min-h-0 min-w-0 flex-col border-b border-border/80 lg:border-r lg:border-b-0">
+            <div className="flex shrink-0 items-center justify-between px-5 pt-5 pb-3 sm:px-7 sm:pt-7">
               <div>
                 <p className="text-sm font-semibold">Folders</p>
               </div>
             </div>
-            {root ? (
-              <DirectoryRow
-                node={root}
-                depth={0}
-                expanded={expanded}
-                childMap={children}
-                loading={loading}
-                updating={updating}
-                selectedPath={selectedPath}
-                onToggleExpanded={toggleExpanded}
-                onSetEnabled={setEnabled}
-                onSelect={loadFiles}
-              />
-            ) : (
-              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-                <LoaderCircle className="size-4 animate-spin" />
-                Loading media directories
-              </div>
-            )}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 sm:px-5 sm:pb-5">
+              {root ? (
+                <DirectoryRow
+                  node={root}
+                  depth={0}
+                  expanded={expanded}
+                  childMap={children}
+                  loading={loading}
+                  updating={updating}
+                  selectedPath={selectedPath}
+                  onToggleExpanded={toggleExpanded}
+                  onSetEnabled={setEnabled}
+                  onSelect={loadFiles}
+                />
+              ) : (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Loading media directories
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex min-h-0 min-w-0 flex-col bg-background/20">
             <div className="flex min-h-16 shrink-0 items-center justify-between border-b border-border/80 px-5">
